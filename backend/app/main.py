@@ -1,5 +1,7 @@
 import secrets
+import redis
 import string
+from app.core.redis_client import redis_client
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
@@ -58,9 +60,29 @@ def shorten(payload: URLCreate, db: Session = Depends(get_db)):
 
 
 
+
 @app.get("/{short_code}")
 def redirect_to_url(short_code: str, db: Session = Depends(get_db)):
+    cache_key = f"url:{short_code}"
+
+    
+    try:
+        cached = redis_client.get(cache_key)
+    except redis.RedisError:
+        cached = None  
+
+    if cached:
+        return RedirectResponse(url=cached, status_code=307)  
+
+    
     url = db.scalar(select(URL).where(URL.short_code == short_code))
     if url is None:
         raise HTTPException(status_code=404, detail="Short link not found")
+
+    
+    try:
+        redis_client.setex(cache_key, settings.cache_ttl_seconds, url.long_url)
+    except redis.RedisError:
+        pass
+
     return RedirectResponse(url=url.long_url, status_code=307)
