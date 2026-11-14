@@ -1,6 +1,8 @@
 import secrets
 import redis
 import string
+import time
+from fastapi import Request
 from app.core.redis_client import redis_client
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -17,6 +19,13 @@ from app.schemas.url import URLCreate, URLResponse
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="LinkTrim API")
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Process-Time-ms"] = f"{elapsed_ms:.2f}"
+    return response
 
 ALPHABET = string.ascii_letters + string.digits
 CODE_LENGTH = 6
@@ -69,10 +78,12 @@ def redirect_to_url(short_code: str, db: Session = Depends(get_db)):
     try:
         cached = redis_client.get(cache_key)
     except redis.RedisError:
-        cached = None  
+        cached = None
 
     if cached:
-        return RedirectResponse(url=cached, status_code=307)  
+        return RedirectResponse(
+            url=cached, status_code=307, headers={"X-Cache": "HIT"}
+        )
 
     
     url = db.scalar(select(URL).where(URL.short_code == short_code))
@@ -85,4 +96,6 @@ def redirect_to_url(short_code: str, db: Session = Depends(get_db)):
     except redis.RedisError:
         pass
 
-    return RedirectResponse(url=url.long_url, status_code=307)
+    return RedirectResponse(
+        url=url.long_url, status_code=307, headers={"X-Cache": "MISS"}
+    )
