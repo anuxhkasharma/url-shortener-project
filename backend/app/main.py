@@ -1,12 +1,12 @@
 import secrets
 import string
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
 
 app = FastAPI(title="LinkTrim API")
 
-# Abhi ke liye temporary storage (Phase 4 mein PostgreSQL aayega)
 url_store: dict[str, str] = {}
 
 BASE_URL = "http://127.0.0.1:8000"
@@ -25,7 +25,7 @@ class URLResponse(BaseModel):
 
 
 def generate_short_code() -> str:
-    # Aisa code banao jo pehle se use mein na ho
+    
     while True:
         code = "".join(secrets.choice(ALPHABET) for _ in range(CODE_LENGTH))
         if code not in url_store:
@@ -51,3 +51,10 @@ def shorten(payload: URLCreate):
         short_url=f"{BASE_URL}/{code}",
         long_url=str(payload.long_url),
     )
+
+@app.get("/{short_code}")
+def redirect_to_url(short_code: str):
+    long_url = url_store.get(short_code)
+    if long_url is None:
+        raise HTTPException(status_code=404, detail="Short link not found")
+    return RedirectResponse(url=long_url, status_code=307)
