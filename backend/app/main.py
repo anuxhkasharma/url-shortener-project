@@ -4,6 +4,7 @@ import string
 import time
 from fastapi import Request
 from app.core.redis_client import redis_client
+from app.core.rate_limiter import rate_limit_shorten
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
@@ -46,7 +47,11 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/shorten", response_model=URLResponse)
+@app.post(
+    "/shorten",
+    response_model=URLResponse,
+    dependencies=[Depends(rate_limit_shorten)],
+)
 def shorten(payload: URLCreate, db: Session = Depends(get_db)):
     long_url = str(payload.long_url)
 
