@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: linktrim_db
+    environment:
+      POSTGRES_USER: linktrim
+      POSTGRES_PASSWORD: linktrim_dev_password
+      POSTGRES_DB: linktrim
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

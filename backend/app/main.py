@@ -1,35 +1,28 @@
 import secrets
 import string
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, HttpUrl
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.database.session import Base, engine, get_db
+from app.models.url import URL
+from app.schemas.url import URLCreate, URLResponse
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="LinkTrim API")
 
-url_store: dict[str, str] = {}
-
-BASE_URL = "http://127.0.0.1:8000"
 ALPHABET = string.ascii_letters + string.digits
 CODE_LENGTH = 6
-
-
-class URLCreate(BaseModel):
-    long_url: HttpUrl
-
-
-class URLResponse(BaseModel):
-    short_code: str
-    short_url: str
-    long_url: str
+MAX_RETRIES = 5
 
 
 def generate_short_code() -> str:
-    
-    while True:
-        code = "".join(secrets.choice(ALPHABET) for _ in range(CODE_LENGTH))
-        if code not in url_store:
-            return code
+    return "".join(secrets.choice(ALPHABET) for _ in range(CODE_LENGTH))
 
 
 @app.get("/")
@@ -43,18 +36,31 @@ def health():
 
 
 @app.post("/shorten", response_model=URLResponse)
-def shorten(payload: URLCreate):
-    code = generate_short_code()
-    url_store[code] = str(payload.long_url)
-    return URLResponse(
-        short_code=code,
-        short_url=f"{BASE_URL}/{code}",
-        long_url=str(payload.long_url),
-    )
+def shorten(payload: URLCreate, db: Session = Depends(get_db)):
+    long_url = str(payload.long_url)
+
+    for _ in range(MAX_RETRIES):
+        code = generate_short_code()
+        db.add(URL(short_code=code, long_url=long_url))
+        try:
+            db.commit()
+        except IntegrityError:
+            
+            db.rollback()
+            continue
+        return URLResponse(
+            short_code=code,
+            short_url=f"{settings.base_url}/{code}",
+            long_url=long_url,
+        )
+
+    raise HTTPException(status_code=500, detail="Could not generate a unique code")
+
+
 
 @app.get("/{short_code}")
-def redirect_to_url(short_code: str):
-    long_url = url_store.get(short_code)
-    if long_url is None:
+def redirect_to_url(short_code: str, db: Session = Depends(get_db)):
+    url = db.scalar(select(URL).where(URL.short_code == short_code))
+    if url is None:
         raise HTTPException(status_code=404, detail="Short link not found")
-    return RedirectResponse(url=long_url, status_code=307)
+    return RedirectResponse(url=url.long_url, status_code=307)
